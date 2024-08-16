@@ -1,0 +1,16 @@
+.text-editor-container {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-top: 10px;
+  }
+  
+  #toolbar {
+    border-bottom: 1px solid #ccc;
+    background-color: #f3f3f3;
+    padding: 10px;
+  }
+  
+  .text-editor {
+    height: 680px; /* Adjust height as needed */
+  }
+  
