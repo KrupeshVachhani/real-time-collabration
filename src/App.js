@@ -1,26 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { v4 as uuidv4 } from 'uuid';
 import TextEditor from './TextEditor';
-import Login from './Login';
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-  };
-
   return (
     <Router>
       <Routes>
-        <Route
-          path="/login"
-          element={isLoggedIn ? <Navigate to="/" /> : <Login onLogin={handleLogin} />}
-        />
-        <Route
-          path="/"
-          element={isLoggedIn ? <TextEditor /> : <Navigate to="/login" />}
-        />
+        <Route path="/" element={<Navigate to={`/document/${uuidv4()}`} />} />
+        <Route path="/document/:id" element={<TextEditor />} />
       </Routes>
     </Router>
   );
