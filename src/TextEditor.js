@@ -7,25 +7,29 @@ import io from "socket.io-client";
 import "./TextEditor.css";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { Offcanvas, Button } from "react-bootstrap";
-import PizZip from "pizzip";
-import Docxtemplater from "docxtemplater";
+import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 
 const TOOLBAR_OPTIONS = [
   [{ header: [1, 2, 3, 4, 5, 6, false] }],
   [{ font: [] }],
-  [{ list: "ordered" }, { list: "bullet" }],
-  ["bold", "italic", "underline"],
-  [{ color: [] }, { background: [] }],
-  [{ script: "sub" }, { script: "super" }],
-  [{ align: [] }],
-  ["image", "blockquote", "code-block"],
-  ["clean"],
+  [{ size: ['small', false, 'large', 'huge'] }],
+  ['bold', 'italic', 'underline', 'strike'],
+  ['blockquote', 'code-block'],
+  [{ 'header': 1 }, { 'header': 2 }],
+  [{ 'list': 'ordered'}, { 'list': 'bullet' }, { 'list': 'check' }],
+  [{ 'script': 'sub'}, { 'script': 'super' }],
+  [{ 'indent': '-1'}, { 'indent': '+1' }],
+  [{ 'direction': 'rtl' }],
+  [{ 'color': [] }, { 'background': [] }],
+  [{ 'align': [] }],
+  ['link', 'image', 'video'],
+  ['formula'],
+  ['clean']
 ];
 
 const SAVE_INTERVAL_MS = 2000;
-const GEMINI_API_KEY = "AIzaSyAALEqckBvFA6x27SFKibRYvmzBPaKarxY";
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyAALEqckBvFA6x27SFKibRYvmzBPaKarxY`;
 
 export default function TextEditor() {
   const { id: documentId } = useParams();
@@ -37,9 +41,10 @@ export default function TextEditor() {
   const [showOffcanvas, setShowOffcanvas] = useState(false);
   const navigate = useNavigate();
   const wrapperRef = useRef();
+  const isLocalChange = useRef(false);
 
   useEffect(() => {
-    const s = io("http://localhost:5000");
+    const s = io(process.env.REACT_APP_SOCKET_URL || "http://localhost:5000");
     setSocket(s);
 
     if (!documentId) {
@@ -73,19 +78,22 @@ export default function TextEditor() {
       socket.emit("save-document", {
         documentId,
         content: quill.getContents(),
+        name: fileName,
       });
     }, SAVE_INTERVAL_MS);
 
     return () => {
       clearInterval(interval);
     };
-  }, [socket, quill, documentId]);
+  }, [socket, quill, documentId, fileName]);
 
   useEffect(() => {
     if (socket == null || quill == null) return;
 
     const handler = (delta) => {
+      isLocalChange.current = true;
       quill.updateContents(delta);
+      isLocalChange.current = false;
     };
     socket.on("receive-changes", handler);
 
@@ -116,7 +124,12 @@ export default function TextEditor() {
     wrapperRef.current.append(editor);
     const q = new Quill(editor, {
       theme: "snow",
-      modules: { toolbar: TOOLBAR_OPTIONS },
+      modules: {
+        toolbar: TOOLBAR_OPTIONS,
+        history: {
+          userOnly: true,
+        },
+      },
     });
     q.disable();
     q.setText("Loading...");
@@ -148,9 +161,7 @@ export default function TextEditor() {
             {
               parts: [
                 {
-                  text:
-                    chatInput +
-                    "\n\nPlease provide your response in a simple HTML format.",
+                  text: chatInput + "\n\nPlease provide your response in a simple HTML format.",
                 },
               ],
             },
@@ -179,11 +190,21 @@ export default function TextEditor() {
   };
 
   const handleUndo = () => {
-    quill.history.undo();
+    if (quill && !isLocalChange.current) {
+      const delta = quill.history.undo();
+      if (delta) {
+        socket.emit("send-changes", { documentId, delta });
+      }
+    }
   };
 
   const handleRedo = () => {
-    quill.history.redo();
+    if (quill && !isLocalChange.current) {
+      const delta = quill.history.redo();
+      if (delta) {
+        socket.emit("send-changes", { documentId, delta });
+      }
+    }
   };
 
   const handleFileNameChange = (e) => {
@@ -194,49 +215,25 @@ export default function TextEditor() {
     }
   };
 
-  // Update the handleDownload function to generate a .docx file
   const handleDownload = () => {
-    const quillContent = quill.getContents();
-    const plainText = quill.getText(); // Extract plain text from the Quill editor
+    const quillContent = quill.getText();
 
-    // Load a base .docx template (make sure you have a base .docx template to use)
-    axios
-      .get("/path/to/template.docx", { responseType: "arraybuffer" }) // You need to serve this file as a public asset
-      .then((response) => {
-        const zip = new PizZip(response.data);
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: [
+            new Paragraph({
+              children: [new TextRun(quillContent)],
+            }),
+          ],
+        },
+      ],
+    });
 
-        // Prepare the content for docxtemplater
-        const doc = new Docxtemplater(zip, {
-          paragraphLoop: true,
-          linebreaks: true,
-        });
-
-        // Use plain text from the editor for the document
-        doc.setData({
-          text: plainText,
-        });
-
-        try {
-          // Render the document (replace all occurrences of {text} with the actual content)
-          doc.render();
-        } catch (error) {
-          console.error("Error rendering the docx file:", error);
-          return;
-        }
-
-        // Generate the document and convert it into a Blob
-        const out = doc.getZip().generate({
-          type: "blob",
-          mimeType:
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        });
-
-        // Save the Blob as a .docx file
-        saveAs(out, `${fileName}.docx`);
-      })
-      .catch((error) => {
-        console.error("Error loading the template:", error);
-      });
+    Packer.toBlob(doc).then((blob) => {
+      saveAs(blob, `${fileName}.docx`);
+    });
   };
 
   const toggleOffcanvas = () => setShowOffcanvas(!showOffcanvas);
@@ -246,16 +243,10 @@ export default function TextEditor() {
       <nav className="navbar navbar-expand-lg navbar-light bg-light">
         <div className="container-fluid">
           <div className="navbar-nav me-auto">
-            <button
-              className="btn btn-outline-secondary me-2"
-              onClick={handleUndo}
-            >
+            <button className="btn btn-outline-secondary me-2" onClick={handleUndo}>
               Undo
             </button>
-            <button
-              className="btn btn-outline-secondary me-2"
-              onClick={handleRedo}
-            >
+            <button className="btn btn-outline-secondary me-2" onClick={handleRedo}>
               Redo
             </button>
           </div>
@@ -267,10 +258,7 @@ export default function TextEditor() {
             style={{ width: "auto" }}
           />
           <div className="navbar-nav ms-auto">
-            <button
-              className="btn btn-outline-primary me-2"
-              onClick={handleDownload}
-            >
+            <button className="btn btn-outline-primary me-2" onClick={handleDownload}>
               Download
             </button>
             <Button variant="primary" onClick={toggleOffcanvas}>

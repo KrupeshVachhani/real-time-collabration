@@ -52,6 +52,8 @@ body, html {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height:90vh;
+  background: #000;
 }
 
 .editor {
